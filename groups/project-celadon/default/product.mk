@@ -12,7 +12,7 @@ INTEL_PATH_VENDOR := vendor/intel
 
 PRODUCT_TAGS += dalvik.gc.type-precise
 
-DEVICE_PACKAGE_OVERLAYS += device/intel/project-celadon/common/overlay
+DEVICE_PACKAGE_OVERLAYS += $(INTEL_PATH_COMMON)/overlay
 
 PRODUCT_PACKAGES += $(THIRD_PARTY_APPS)
 
