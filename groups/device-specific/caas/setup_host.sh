@@ -12,6 +12,7 @@ trap 'error ${LINENO} "$BASH_COMMAND"' ERR
 reboot_required=0
 QEMU_REL=qemu-4.2.0
 CIV_WORK_DIR=$(pwd)
+CIV_GOP_PKG_PATH=
 
 function ubu_changes_require(){
 	echo "Please make sure your apt is working"
@@ -64,7 +65,12 @@ function ubu_install_qemu_gvtd(){
 	tar -xf $CIV_WORK_DIR/$QEMU_REL.tar.xz
 
 	cd $CIV_WORK_DIR/$QEMU_REL/
+
 	patch -p1 < $CIV_WORK_DIR/patches/qemu/0001-Revert-Revert-vfio-pci-quirks.c-Disable-stolen-memor.patch
+	if [ -d $CIV_GOP_DIR ]; then
+		for i in $CIV_GOP_DIR/qemu/*.patch; do patch -p1 < $i; done
+	fi
+
 	./configure --prefix=/usr \
 		--enable-kvm \
 		--disable-xen \
@@ -106,11 +112,23 @@ function ubu_build_ovmf(){
 function ubu_build_ovmf_gvtd(){
 	sudo apt install -y uuid-dev nasm acpidump iasl
 	cd $CIV_WORK_DIR/$QEMU_REL/roms/edk2
+
 	patch -p4 < $CIV_WORK_DIR/patches/ovmf/OvmfPkg-add-IgdAssgingmentDxe-for-qemu-4_2_0.patch
+	if [ -d $CIV_GOP_DIR ]; then
+		for i in $CIV_GOP_DIR/ovmf/*.patch; do patch -p1 < $i; done
+		cp $CIV_GOP_DIR/ovmf/Vbt.bin OvmfPkg/Vbt/Vbt.bin
+	fi
+
 	source ./edksetup.sh
 	make -C BaseTools/
 	build -b DEBUG -t GCC5 -a X64 -p OvmfPkg/OvmfPkgX64.dsc -D NETWORK_IP4_ENABLE -D NETWORK_ENABLE  -D SECURE_BOOT_ENABLE
 	cp Build/OvmfX64/DEBUG_GCC5/FV/OVMF.fd ../../../OVMF.fd
+
+	if [ -d $CIV_GOP_DIR ]; then
+		local gpu_device_id=$(cat /sys/bus/pci/devices/0000:00:02.0/device)
+		./BaseTools/Source/C/bin/EfiRom -f 0x8086 -i $gpu_device_id -e $CIV_GOP_DIR/IntelGopDriver.efi -o $CIV_GOP_DIR/GOP.rom
+	fi
+
 	cd -
 }
 
@@ -228,6 +246,35 @@ function ubu_thermal_conf (){
 	systemctl daemon-reload
 	systemctl start thermald.service
 }
+
+show_help()
+{
+	echo -e "$(basename "$0") [-h] [--gvtd [GOP_PKG_PATH=/path/to/GOP/PACKAGE]]"
+	echo -e "Options:"
+	echo -e "\t-h|--help  show this help message"
+	echo -e "\t--gvtd [GOP_PKG_PATH=/path/to/GOP/PACKAGE] Enable GVT-d mode, if GOP_PKG_PATH is specified, then related patches will be applied"
+}
+
+while :; do
+	case $1 in
+		-h|-\?|--help)
+			show_help
+			exit
+			;;
+		--gvtd)
+			SETUP_GVTD=true
+			if [ $2 == "GOP_PKG_PATH=?*" ]; then
+				CIV_GOP_PKG_PATH=${1#*=}
+				shift
+			fi
+			;;
+		-?*)
+			echo "Error: Invalid option $1"
+			exit
+			;;
+	esac
+	shift
+done
 
 version=`cat /proc/version`
 
